@@ -1,0 +1,5 @@
+FROM python:3.12-slim
+WORKDIR /app
+RUN pip install --no-cache-dir paho-mqtt==1.6.1
+COPY systa_bridge.py .
+CMD ["python", "-u", "systa_bridge.py"]

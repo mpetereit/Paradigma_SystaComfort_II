@@ -1,0 +1,14 @@
+services:
+  paradigma-scraper:
+    build: .
+    container_name: paradigma-scraper
+    restart: unless-stopped
+    environment:
+      PARADIGMA_USER: ${PARADIGMA_USER}
+      PARADIGMA_PASS: ${PARADIGMA_PASS}
+      MQTT_HOST: ${MQTT_HOST}
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASS: ${MQTT_PASS}
+      POLL_INTERVAL_SECONDS: "300"
+    volumes:
+      - ./data:/data
