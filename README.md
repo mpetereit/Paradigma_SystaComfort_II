@@ -113,3 +113,7 @@ Inoffizielles Projekt, nicht mit Paradigma / Ritter Energie- und
 Umwelttechnik verbunden. Nutzung auf eigene Gefahr. Die Bridge sendet
 ausschließlich die Lese-/Monitoring-Befehle, die auch die offizielle
 Wartungssoftware verwendet.
+
+## Lizenz
+
+[MIT](LICENSE)
