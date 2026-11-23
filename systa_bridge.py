@@ -68,6 +68,38 @@ CORRELATE_TOPIC = os.environ.get("CORRELATE_TOPIC", "")
 
 START_SEQUENCE = ["16", "17", "1c0c18", "14"]  # Laengenbyte ergaenzt frame()
 
+# Einstellungen/Zaehler: dieselben Lesebefehle wie SystaService "Alles Auslesen".
+PARAM_INTERVAL = float(os.environ.get("PARAM_INTERVAL_SECONDS", "3600"))
+SOLAR_PARAM_INTERVAL = float(os.environ.get("SOLAR_PARAM_INTERVAL_SECONDS", "300"))
+COMFORT_PARAM_READS = ["1c0c0300022a", "1c0c0301882a", "1c0c03030e09", "1c0c0303f70f"]
+SOLAR_PARAM_READ = "1c2402"
+# Speicheradressen SystaComfort (uint16 big endian): (adresse, key, name, unit, dclass, divisor)
+COMFORT_PARAMS = [
+    (0x0005, "einst_hk1_raum_normal", "Einstellung HK1 Raum Normal", "°C", "temperature", 10),
+    (0x0007, "einst_hk1_raum_komfort", "Einstellung HK1 Raum Komfort", "°C", "temperature", 10),
+    (0x0009, "einst_hk1_raum_absenken", "Einstellung HK1 Raum Absenken", "°C", "temperature", 10),
+    (0x0010, "einst_hk1_fusspunkt", "Einstellung HK1 Fußpunkt", "°C", "temperature", 10),
+    (0x0012, "einst_hk1_steilheit", "Einstellung HK1 Steilheit", None, None, 10),
+    (0x0015, "einst_hk1_max_vorlauf", "Einstellung HK1 max. Vorlauf", "°C", "temperature", 10),
+    (0x018B, "einst_hk2_raum_normal", "Einstellung HK2 Raum Normal", "°C", "temperature", 10),
+    (0x018D, "einst_hk2_raum_komfort", "Einstellung HK2 Raum Komfort", "°C", "temperature", 10),
+    (0x018F, "einst_hk2_raum_absenken", "Einstellung HK2 Raum Absenken", "°C", "temperature", 10),
+    (0x0196, "einst_hk2_fusspunkt", "Einstellung HK2 Fußpunkt", "°C", "temperature", 10),
+    (0x0198, "einst_hk2_steilheit", "Einstellung HK2 Steilheit", None, None, 10),
+    (0x019B, "einst_hk2_max_vorlauf", "Einstellung HK2 max. Vorlauf", "°C", "temperature", 10),
+    (0x030E, "einst_ww_soll", "Einstellung Warmwasser Soll", "°C", "temperature", 10),
+    (0x0310, "einst_ww_komfort", "Einstellung Warmwasser Komfort", "°C", "temperature", 10),
+    (0x03F9, "einst_puffer_max", "Einstellung Puffer max.", "°C", "temperature", 10),
+]
+# Solarregler-Block 1c 24 02 (little endian): (offset, fmt, key, name, unit, dclass, faktor)
+SOLAR_PARAMS = [
+    (8, "<H", "einst_solar_ww_soll", "Einstellung Solar WW-Soll", "°C", "temperature", 0.1),
+    (10, "<H", "einst_solar_speicher_max", "Einstellung Solar Speicher max.", "°C", "temperature", 0.1),
+    (40, "<I", "solar_pumpe_laufzeit", "Solar Pumpe Laufzeit", "h", "duration", 1 / 3600),
+    (56, "<I", "solar_gesamtgewinn", "Solar Gesamtgewinn", "kWh", "energy", 0.1),
+    (60, "<I", "solar_stagnation", "Solar Summe Stagnation", "h", "duration", 1 / 60),
+]
+
 # ----------------------------------------------------------------------
 # Feldzuordnung. Offset = Byte-Position in den Nutzdaten NACH
 # [Typ][Len][Geraet][Block]. Verifiziert gegen SystaService-Monitoring
@@ -115,7 +147,9 @@ SOLAR_1 = [  # fc 3e 24 01, little endian
 ]
 SOLAR_1_U16 = [  # (offset, key, name, unit, device_class, divisor), uint16 LE
     (27, "solar_tagesgewinn", "Solar Tagesgewinn", "kWh", "energy", 10),
-    (33, "solar_gesamtgewinn", "Solar Gesamtgewinn", "kWh", "energy", 1),
+    # @33 = Gesamtgewinn in ganzen kWh; stattdessen genauer (0,1 kWh) aus dem
+    # Parameterblock 1c 24 02 (SOLAR_PARAMS) - nicht beide Quellen mischen,
+    # sonst sieht HA bei 16305,1 -> 16305 einen Zaehler-Reset.
 ]
 # Bits (offset, maske, key, name) – per Korrelation mit dem Portal-Scraper
 # bestaetigt (22./23.11.2026, 12 Schaltwechsel).
@@ -126,7 +160,8 @@ COMFORT_2_BITS = [
     (13, 0x04, "kesselpumpe_aktiv", "Kesselpumpe PK aktiv"),
 ]
 TOTAL_INCREASING = {"kessel_starts", "kessel_betriebsstunden",
-                    "solar_tagesgewinn", "solar_gesamtgewinn"}
+                    "solar_tagesgewinn", "solar_gesamtgewinn",
+                    "solar_pumpe_laufzeit", "solar_stagnation"}
 
 
 class RawLog:
@@ -225,6 +260,26 @@ def publish_bits(mq, data, bits):
             mq.pub(key, name, data[off] & mask, binary=True)
 
 
+COMFORT_MEM = {}  # Adresse -> Byte, aus den Speicher-Lese-Antworten
+
+
+def handle_param_reply(mq, body):
+    dev, cmd = body[0], body[1]
+    if dev == 0x0C and cmd == 0x03 and len(body) >= 5:
+        addr, n = (body[2] << 8) | body[3], body[4]
+        for i, b in enumerate(body[5:5 + n]):
+            COMFORT_MEM[addr + i] = b
+        for a, key, name, unit, dclass, div in COMFORT_PARAMS:
+            if a in COMFORT_MEM and a + 1 in COMFORT_MEM and addr <= a < addr + n:
+                raw = (COMFORT_MEM[a] << 8) | COMFORT_MEM[a + 1]
+                mq.pub(key, name, round(raw / div, 1), unit, dclass)
+    elif dev == 0x24 and cmd == 0x02:
+        data = body[2:]
+        for off, fmt, key, name, unit, dclass, fak in SOLAR_PARAMS:
+            if off + struct.calcsize(fmt) <= len(data):
+                mq.pub(key, name, round(struct.unpack_from(fmt, data, off)[0] * fak, 1), unit, dclass)
+
+
 def handle(mq, pkt: bytes, rawlog=None):
     if len(pkt) < 8:
         return
@@ -236,6 +291,9 @@ def handle(mq, pkt: bytes, rawlog=None):
         return
     if RAW_DEBUG and typ in (0xFC, 0xFD):
         log.info("RAW %s", f.hex(" "))
+    if typ == 0xFD and len(body) >= 2:
+        handle_param_reply(mq, body)
+        return
     if typ != 0xFC or len(body) < 2:
         return
     if rawlog:
@@ -254,6 +312,11 @@ def handle(mq, pkt: bytes, rawlog=None):
     elif dev == 0x24 and blk == 0x01:
         publish_fields(mq, data, SOLAR_1, False)
         for off, key, name, unit, dclass, div in SOLAR_1_U16:
+            # In ~10 % der Frames steht an Byte 27 das Low-Byte der
+            # Gesamtenergie (@33) statt des Tagesgewinns -> diese Frames
+            # fuer den Tagesgewinn ignorieren.
+            if key == "solar_tagesgewinn" and len(data) > 33 and data[27] == data[33] != 0:
+                continue
             if off + 2 <= len(data):
                 v = struct.unpack_from("<H", data, off)[0]
                 mq.pub(key, name, round(v / div, 1) if div != 1 else v, unit, dclass)
@@ -271,6 +334,8 @@ def main():
     dest = (SYSTA_HOST, SYSTA_PORT)
     log.info("Bridge startet: %s:%d", *dest)
     last_start = 0.0
+    last_param = time.time() - PARAM_INTERVAL + 20
+    last_solar = time.time() - SOLAR_PARAM_INTERVAL + 20
     last_data = time.time()
     online = True
     while True:
@@ -280,6 +345,15 @@ def main():
                 sock.sendto(frame(cmd), dest)
                 time.sleep(0.3)
             last_start = now
+        # Einstellungen/Zaehler: erst 20 s nach Start, dann im Intervall
+        if PARAM_INTERVAL > 0 and now - last_param >= PARAM_INTERVAL:
+            for cmd in COMFORT_PARAM_READS:
+                sock.sendto(frame(cmd), dest)
+                time.sleep(0.5)
+            last_param = now
+        if SOLAR_PARAM_INTERVAL > 0 and now - last_solar >= SOLAR_PARAM_INTERVAL:
+            sock.sendto(frame(SOLAR_PARAM_READ), dest)
+            last_solar = now
         try:
             pkt, addr = sock.recvfrom(4096)
         except socket.timeout:

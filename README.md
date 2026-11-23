@@ -26,6 +26,12 @@ Alle ~10 Sekunden:
 | Kessel-Betriebsstunden, Kesselstarts | |
 | Kessel-Anforderung (B1), Kesselpumpe aktiv (an/aus) | |
 
+Zusätzlich liest die Bridge mit denselben Lesebefehlen wie „Alles Auslesen“
+in SystaService **Einstellungen und Zähler** (stündlich bzw. alle 5 min):
+Raumsollwerte, Heizkurve (Fußpunkt, Steilheit, max. Vorlauf) für HK1/HK2,
+Warmwasser-Sollwerte, Puffer-Maximum, Solar WW-Soll/Speicher-Maximum,
+Solarpumpen-Laufzeit, Stagnationszeit und Solar-Gesamtgewinn (0,1 kWh).
+
 Nicht angeschlossene Fühler (Rohwert −30,0 °C) werden ausgelassen.
 MQTT-Topics: `systa/<wert>`, Verfügbarkeit `systa/status`, HA-Gerät
 „SystaComfort II (lokal)“.
@@ -77,7 +83,8 @@ Prüfsumme: Summe aller Frame-Bytes ≡ 0 (mod 256)
 | `17` | Monitoring SystaComfort an |
 | `1c 0c 18` | (Teil der Start-Sequenz von SystaService) |
 | `14` | Monitoring Solarregler an |
-| `1c 0c 03 <AdrH> <AdrL> <Len>` | Speicher/Parameter lesen („Alles Auslesen“) |
+| `1c 0c 03 <AdrH> <AdrL> <Len>` | Speicher/Parameter SystaComfort lesen („Alles Auslesen“), Werte BE |
+| `1c 24 02` | Parameter/Zähler Solarregler lesen (108 Byte, LE) |
 
 Nach der Start-Sequenz sendet der Regler alle ~10 s; ohne Wiederholung endet
 der Strom nach ~60 s (die Bridge wiederholt alle 30 s).
