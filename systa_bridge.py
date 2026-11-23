@@ -113,6 +113,20 @@ SOLAR_1 = [  # fc 3e 24 01, little endian
     (6, "solar_aussen", "Solar Außenfühler TAM", "°C", "temperature", 10),
     (10, "solar_ruecklauf", "Solar Rücklauf TSE", "°C", "temperature", 10),
 ]
+SOLAR_1_U16 = [  # (offset, key, name, unit, device_class, divisor), uint16 LE
+    (27, "solar_tagesgewinn", "Solar Tagesgewinn", "kWh", "energy", 10),
+    (33, "solar_gesamtgewinn", "Solar Gesamtgewinn", "kWh", "energy", 1),
+]
+# Bits (offset, maske, key, name) – per Korrelation mit dem Portal-Scraper
+# bestaetigt (22./23.11.2026, 12 Schaltwechsel).
+COMFORT_1_BITS = [
+    (30, 0x01, "kessel_anforderung", "Kessel Anforderung (B1)"),
+]
+COMFORT_2_BITS = [
+    (13, 0x04, "kesselpumpe_aktiv", "Kesselpumpe PK aktiv"),
+]
+TOTAL_INCREASING = {"kessel_starts", "kessel_betriebsstunden",
+                    "solar_tagesgewinn", "solar_gesamtgewinn"}
 
 
 class RawLog:
@@ -166,7 +180,9 @@ class Mqtt:
         if self.rawlog:
             self.rawlog.write("MQTT", msg.topic, msg.payload.decode(errors="replace").replace(" ", "_"))
 
-    def pub(self, key, name, value, unit=None, dclass=None):
+    def pub(self, key, name, value, unit=None, dclass=None, binary=False):
+        if binary:
+            value = "ON" if value else "OFF"
         if not self.c:
             log.info("%-28s %s %s", name, value, unit or "")
             return
@@ -181,11 +197,10 @@ class Mqtt:
                 cfg["unit_of_measurement"] = unit
             if dclass:
                 cfg["device_class"] = dclass
-            if dclass != "timestamp":
-                cfg["state_class"] = ("total_increasing"
-                                      if key in ("kessel_starts", "kessel_betriebsstunden")
-                                      else "measurement")
-            self.c.publish(f"{DISCOVERY_PREFIX}/sensor/{uid}/config", json.dumps(cfg), retain=True)
+            if not binary and dclass != "timestamp":
+                cfg["state_class"] = "total_increasing" if key in TOTAL_INCREASING else "measurement"
+            comp = "binary_sensor" if binary else "sensor"
+            self.c.publish(f"{DISCOVERY_PREFIX}/{comp}/{uid}/config", json.dumps(cfg), retain=True)
             self.sent.add(uid)
         self.c.publish(topic, "" if value is None else value, retain=True)
 
@@ -202,6 +217,12 @@ def publish_fields(mq, data, fields, big):
         if dclass == "temperature" and raw == SENSOR_NA:
             continue  # Fuehler nicht angeschlossen -> nicht anlegen
         mq.pub(key, name, round(raw / div, 1) if div != 1 else raw, unit, dclass)
+
+
+def publish_bits(mq, data, bits):
+    for off, mask, key, name in bits:
+        if off < len(data):
+            mq.pub(key, name, data[off] & mask, binary=True)
 
 
 def handle(mq, pkt: bytes, rawlog=None):
@@ -222,14 +243,20 @@ def handle(mq, pkt: bytes, rawlog=None):
     dev, blk, data = body[0], body[1], body[2:]
     if dev == 0x0C and blk == 0x01:
         publish_fields(mq, data, COMFORT_1, True)
+        publish_bits(mq, data, COMFORT_1_BITS)
         mq.pub("letzte_aktualisierung", "Letzte Aktualisierung",
                time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()), None, "timestamp")
     elif dev == 0x0C and blk == 0x02:
         publish_fields(mq, data, COMFORT_2, True)
         for off, key, name, unit, dclass in COMFORT_2_U32:
             mq.pub(key, name, struct.unpack_from(">I", data, off)[0], unit, dclass)
+        publish_bits(mq, data, COMFORT_2_BITS)
     elif dev == 0x24 and blk == 0x01:
         publish_fields(mq, data, SOLAR_1, False)
+        for off, key, name, unit, dclass, div in SOLAR_1_U16:
+            if off + 2 <= len(data):
+                v = struct.unpack_from("<H", data, off)[0]
+                mq.pub(key, name, round(v / div, 1) if div != 1 else v, unit, dclass)
 
 
 def main():

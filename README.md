@@ -22,15 +22,16 @@ Alle ~10 Sekunden:
 | Puffer oben / unten + Soll | Speicher oben TW |
 | HK1/HK2 Vorlauf, Rücklauf, Raum + Sollwerte | Solar Vorlauf / Rücklauf |
 | Kessel Vorlauf / Rücklauf | Außenfühler TAM |
-| Pumpen PK / PHK / PHK2 (%) | |
+| Pumpen PK / PHK / PHK2 (%) | Tagesgewinn, Gesamtgewinn (kWh) |
 | Kessel-Betriebsstunden, Kesselstarts | |
+| Kessel-Anforderung (B1), Kesselpumpe aktiv (an/aus) | |
 
 Nicht angeschlossene Fühler (Rohwert −30,0 °C) werden ausgelassen.
 MQTT-Topics: `systa/<wert>`, Verfügbarkeit `systa/status`, HA-Gerät
 „SystaComfort II (lokal)“.
 
-**Noch nicht entschlüsselt:** Relais (Brenner, Pumpen an/aus, Mischer),
-Betriebsart/Status-Texte, Störungscodes, Solarleistung/-ertrag.
+**Noch nicht entschlüsselt:** weitere Relais (Mischer, Zirkulation, Solarpumpe),
+Betriebsart/Status-Texte, Störungscodes, Solarleistung, Volumenstrom.
 Beiträge willkommen – siehe [Weitere Felder entschlüsseln](#weitere-felder-entschlüsseln).
 
 ## Voraussetzungen
@@ -85,7 +86,7 @@ der Strom nach ~60 s (die Bridge wiederholt alle 30 s).
 |---|---|---|
 | `fc 29 0c 01` | Messwerte SystaComfort (ab Byte 4: TA, TWO, FA TV, FA TR, TI, TI2, TV, TV2, TR, TR2, TPO, TPU, TZR) | int16 big endian, /10 °C |
 | `fc 29 0c 02` | Sollwerte, Pumpen-%, Betriebsstunden (u32 @14), Kesselstarts (u32 @18) | big endian |
-| `fc 3e 24 01` | Solarregler (TSA, TW, TSV, TAM, –, TSE) | int16 little endian, /10 °C |
+| `fc 3e 24 01` | Solarregler (TSA, TW, TSV, TAM, –, TSE); Tagesgewinn u16 @27 /10 kWh, Gesamtgewinn u16 @33 kWh | little endian |
 
 Vollständige Feldtabelle: `systa_bridge.py`.
 
