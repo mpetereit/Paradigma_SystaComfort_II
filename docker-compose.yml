@@ -6,6 +6,8 @@ services:
     env_file: .env
     volumes:
       - ./data:/data
+      # lokale Zeitzone (Tageswechsel fuer den Solar-Tagesgewinn)
+      - /etc/localtime:/etc/localtime:ro
     logging:
       driver: json-file
       options: { max-size: "5m", max-file: "3" }

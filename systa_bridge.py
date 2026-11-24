@@ -145,12 +145,12 @@ SOLAR_1 = [  # fc 3e 24 01, little endian
     (6, "solar_aussen", "Solar Außenfühler TAM", "°C", "temperature", 10),
     (10, "solar_ruecklauf", "Solar Rücklauf TSE", "°C", "temperature", 10),
 ]
-SOLAR_1_U16 = [  # (offset, key, name, unit, device_class, divisor), uint16 LE
-    (27, "solar_tagesgewinn", "Solar Tagesgewinn", "kWh", "energy", 10),
-    # @33 = Gesamtgewinn in ganzen kWh; stattdessen genauer (0,1 kWh) aus dem
-    # Parameterblock 1c 24 02 (SOLAR_PARAMS) - nicht beide Quellen mischen,
-    # sonst sieht HA bei 16305,1 -> 16305 einen Zaehler-Reset.
-]
+# Monitoring-Solarblock: Byte 27 ist ein Wechselfeld (Tagesgewinn, Low-Byte der
+# Gesamtenergie, 0 ...) und Byte 33 der Gesamtgewinn nur in ganzen kWh -> beide
+# NICHT verwenden. Tages- und Gesamtgewinn kommen aus dem Parameterblock
+# 1c 24 02 (0,1 kWh); der Tagesgewinn wird als Differenz zum Zaehlerstand bei
+# Tagesbeginn berechnet (persistiert in STATE_FILE).
+STATE_FILE = os.environ.get("STATE_FILE", "/data/state.json")
 # Bits (offset, maske, key, name) – per Korrelation mit dem Portal-Scraper
 # bestaetigt (22./23.11.2026, 12 Schaltwechsel).
 COMFORT_1_BITS = [
@@ -281,6 +281,28 @@ def handle_param_reply(mq, body):
         for off, fmt, key, name, unit, dclass, fak in SOLAR_PARAMS:
             if off + struct.calcsize(fmt) <= len(data):
                 mq.pub(key, name, round(struct.unpack_from(fmt, data, off)[0] * fak, 1), unit, dclass)
+        if len(data) >= 60:
+            total = struct.unpack_from("<I", data, 56)[0] / 10
+            mq.pub("solar_tagesgewinn", "Solar Tagesgewinn", day_gain(total), "kWh", "energy")
+
+
+def day_gain(total, today=None):
+    """Tagesgewinn = Gesamtzaehler - Stand beim ersten Wert des (lokalen) Tages."""
+    today = today or time.strftime("%Y-%m-%d")
+    state = {}
+    try:
+        with open(STATE_FILE, encoding="utf-8") as fh:
+            state = json.load(fh)
+    except (OSError, ValueError):
+        pass
+    if state.get("day") != today or total < state.get("start_total", total):
+        state = {"day": today, "start_total": total}
+        try:
+            with open(STATE_FILE, "w", encoding="utf-8") as fh:
+                json.dump(state, fh)
+        except OSError:
+            log.warning("Konnte %s nicht schreiben", STATE_FILE)
+    return round(max(0.0, total - state["start_total"]), 1)
 
 
 def handle(mq, pkt: bytes, rawlog=None):
@@ -316,15 +338,6 @@ def handle(mq, pkt: bytes, rawlog=None):
         publish_bits(mq, data, COMFORT_2_BITS)
     elif dev == 0x24 and blk == 0x01:
         publish_fields(mq, data, SOLAR_1, False)
-        for off, key, name, unit, dclass, div in SOLAR_1_U16:
-            # In ~10 % der Frames steht an Byte 27 das Low-Byte der
-            # Gesamtenergie (@33) statt des Tagesgewinns -> diese Frames
-            # fuer den Tagesgewinn ignorieren.
-            if key == "solar_tagesgewinn" and len(data) > 33 and data[27] == data[33] != 0:
-                continue
-            if off + 2 <= len(data):
-                v = struct.unpack_from("<H", data, off)[0]
-                mq.pub(key, name, round(v / div, 1) if div != 1 else v, unit, dclass)
         if len(data) > 17:
             mq.pub("solar_volumenstrom", "Solar Volumenstrom",
                    round(struct.unpack_from("<H", data, 12)[0] / 10, 1), "L/min", "volume_flow_rate")
