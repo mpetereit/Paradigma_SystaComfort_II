@@ -24,7 +24,8 @@ Alle ~10 Sekunden:
 | Kessel Vorlauf / Rücklauf | Außenfühler TAM |
 | Pumpen PK / PHK / PHK2 (%) | Tagesgewinn, Gesamtgewinn (kWh) |
 | Kessel-Betriebsstunden, Kesselstarts | |
-| Kessel-Anforderung (B1), Kesselpumpe aktiv (an/aus) | |
+| Kessel-Anforderung (B1), Kesselpumpe aktiv (an/aus) | Volumenstrom (l/min), Leistung (kW) |
+| Status Heizkreis 1 (Text) | Status Solar (Text) |
 
 Zusätzlich liest die Bridge mit denselben Lesebefehlen wie „Alles Auslesen“
 in SystaService **Einstellungen und Zähler** (stündlich bzw. alle 5 min):
@@ -37,7 +38,7 @@ MQTT-Topics: `systa/<wert>`, Verfügbarkeit `systa/status`, HA-Gerät
 „SystaComfort II (lokal)“.
 
 **Noch nicht entschlüsselt:** weitere Relais (Mischer, Zirkulation, Solarpumpe),
-Betriebsart/Status-Texte, Störungscodes, Solarleistung, Volumenstrom.
+Status Warmwasser/Zirkulation/Kessel als Text, Störungscodes.
 Beiträge willkommen – siehe [Weitere Felder entschlüsseln](#weitere-felder-entschlüsseln).
 
 ## Voraussetzungen

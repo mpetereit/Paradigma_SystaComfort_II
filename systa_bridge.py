@@ -159,6 +159,9 @@ COMFORT_1_BITS = [
 COMFORT_2_BITS = [
     (13, 0x04, "kesselpumpe_aktiv", "Kesselpumpe PK aktiv"),
 ]
+# Statuscodes (Byte-Code), per Korrelation mit dem Portal bestaetigt (22.-24.11.2026)
+STATUS_HK1 = {0x08: "Vorhaltezeit", 0x09: "Heizbetrieb", 0x0A: "Komfortbetrieb", 0x0B: "Absenkbetrieb"}
+STATUS_SOLAR = {0x01: "Frostschutz", 0x03: "Einschaltverzögerung", 0x04: "Solaranlage erwärmt Speicher"}
 TOTAL_INCREASING = {"kessel_starts", "kessel_betriebsstunden",
                     "solar_tagesgewinn", "solar_gesamtgewinn",
                     "solar_pumpe_laufzeit", "solar_stagnation"}
@@ -232,7 +235,7 @@ class Mqtt:
                 cfg["unit_of_measurement"] = unit
             if dclass:
                 cfg["device_class"] = dclass
-            if not binary and dclass != "timestamp":
+            if not binary and dclass != "timestamp" and isinstance(value, (int, float)):
                 cfg["state_class"] = "total_increasing" if key in TOTAL_INCREASING else "measurement"
             comp = "binary_sensor" if binary else "sensor"
             self.c.publish(f"{DISCOVERY_PREFIX}/{comp}/{uid}/config", json.dumps(cfg), retain=True)
@@ -302,6 +305,8 @@ def handle(mq, pkt: bytes, rawlog=None):
     if dev == 0x0C and blk == 0x01:
         publish_fields(mq, data, COMFORT_1, True)
         publish_bits(mq, data, COMFORT_1_BITS)
+        if len(data) > 32:
+            mq.pub("status_hk1", "Status HK1", STATUS_HK1.get(data[32], f"Code {data[32]}"))
         mq.pub("letzte_aktualisierung", "Letzte Aktualisierung",
                time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()), None, "timestamp")
     elif dev == 0x0C and blk == 0x02:
@@ -320,6 +325,14 @@ def handle(mq, pkt: bytes, rawlog=None):
             if off + 2 <= len(data):
                 v = struct.unpack_from("<H", data, off)[0]
                 mq.pub(key, name, round(v / div, 1) if div != 1 else v, unit, dclass)
+        if len(data) > 17:
+            mq.pub("solar_volumenstrom", "Solar Volumenstrom",
+                   round(struct.unpack_from("<H", data, 12)[0] / 10, 1), "L/min", "volume_flow_rate")
+            mq.pub("status_solar", "Status Solar", STATUS_SOLAR.get(data[17], f"Code {data[17]}"))
+    elif dev == 0x0B and blk == 0x01 and len(data) >= 20:
+        # Kurzfassung der Solardaten (big endian); Leistung nur hier gefunden
+        mq.pub("solar_leistung", "Solar Leistung",
+               round(struct.unpack_from(">H", data, 18)[0] / 10, 1), "kW", "power")
 
 
 def main():
