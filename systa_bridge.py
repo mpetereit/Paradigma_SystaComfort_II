@@ -342,6 +342,8 @@ def handle(mq, pkt: bytes, rawlog=None):
             mq.pub("solar_volumenstrom", "Solar Volumenstrom",
                    round(struct.unpack_from("<H", data, 12)[0] / 10, 1), "L/min", "volume_flow_rate")
             mq.pub("status_solar", "Status Solar", STATUS_SOLAR.get(data[17], f"Code {data[17]}"))
+            # Drehzahl Solarpumpe PSO in % (0 = aus), bestaetigt gegen Portal 24.11.2026
+            mq.pub("solarpumpe_drehzahl", "Solarpumpe Drehzahl", data[14], "%", None)
     elif dev == 0x0B and blk == 0x01 and len(data) >= 20:
         # Kurzfassung der Solardaten (big endian); Leistung nur hier gefunden
         mq.pub("solar_leistung", "Solar Leistung",

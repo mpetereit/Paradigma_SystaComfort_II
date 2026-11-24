@@ -26,6 +26,7 @@ Alle ~10 Sekunden:
 | Kessel-Betriebsstunden, Kesselstarts | |
 | Kessel-Anforderung (B1), Kesselpumpe aktiv (an/aus) | Volumenstrom (l/min), Leistung (kW) |
 | Status Heizkreis 1 (Text) | Status Solar (Text) |
+| | Drehzahl Solarpumpe (%) |
 
 Zusätzlich liest die Bridge mit denselben Lesebefehlen wie „Alles Auslesen“
 in SystaService **Einstellungen und Zähler** (stündlich bzw. alle 5 min):
