@@ -286,23 +286,44 @@ def handle_param_reply(mq, body):
             mq.pub("solar_tagesgewinn", "Solar Tagesgewinn", day_gain(total), "kWh", "energy")
 
 
+def load_state():
+    try:
+        with open(STATE_FILE, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(state):
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as fh:
+            json.dump(state, fh)
+    except OSError:
+        log.warning("Konnte %s nicht schreiben", STATE_FILE)
+
+
 def day_gain(total, today=None):
     """Tagesgewinn = Gesamtzaehler - Stand beim ersten Wert des (lokalen) Tages."""
     today = today or time.strftime("%Y-%m-%d")
-    state = {}
-    try:
-        with open(STATE_FILE, encoding="utf-8") as fh:
-            state = json.load(fh)
-    except (OSError, ValueError):
-        pass
+    state = load_state()
     if state.get("day") != today or total < state.get("start_total", total):
-        state = {"day": today, "start_total": total}
-        try:
-            with open(STATE_FILE, "w", encoding="utf-8") as fh:
-                json.dump(state, fh)
-        except OSError:
-            log.warning("Konnte %s nicht schreiben", STATE_FILE)
+        state["day"], state["start_total"] = today, total
+        save_state(state)
     return round(max(0.0, total - state["start_total"]), 1)
+
+
+def collector_day_max(tsa, today=None):
+    """Kollektor-Maximum seit Mitternacht (wie 'Kollektor maximum' im Portal;
+    Abgleich 22.-25.11.2026: Abweichung <= 0,1 K)."""
+    today = today or time.strftime("%Y-%m-%d")
+    state = load_state()
+    if state.get("max_day") != today:
+        state["max_day"], state["kollektor_max"] = today, tsa
+        save_state(state)
+    elif tsa > state["kollektor_max"]:
+        state["kollektor_max"] = tsa
+        save_state(state)
+    return state["kollektor_max"]
 
 
 def handle(mq, pkt: bytes, rawlog=None):
@@ -336,8 +357,18 @@ def handle(mq, pkt: bytes, rawlog=None):
         for off, key, name, unit, dclass in COMFORT_2_U32:
             mq.pub(key, name, struct.unpack_from(">I", data, off)[0], unit, dclass)
         publish_bits(mq, data, COMFORT_2_BITS)
+        if len(data) >= 24:
+            # Byte 22-23: 0xFFFF im gesamten Log (Portal: "Keine Stoerung") -> vermutl.
+            # Stoercode Kessel; andere Werte noch nie gesehen (unbestaetigt)
+            code = struct.unpack_from(">H", data, 22)[0]
+            mq.pub("kessel_stoerung", "Kessel Störung", "keine" if code == 0xFFFF else f"Code {code}")
     elif dev == 0x24 and blk == 0x01:
         publish_fields(mq, data, SOLAR_1, False)
+        if len(data) >= 2:
+            tsa = i16(data, 0, False)
+            if tsa != SENSOR_NA and -500 < tsa < 2500:
+                mq.pub("solar_kollektor_max_heute", "Solar Kollektor Maximum heute",
+                       collector_day_max(round(tsa / 10, 1)), "°C", "temperature")
         if len(data) > 17:
             mq.pub("solar_volumenstrom", "Solar Volumenstrom",
                    round(struct.unpack_from("<H", data, 12)[0] / 10, 1), "L/min", "volume_flow_rate")
