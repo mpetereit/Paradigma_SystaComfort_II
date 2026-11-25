@@ -161,7 +161,7 @@ COMFORT_2_BITS = [
 ]
 # Statuscodes (Byte-Code), per Korrelation mit dem Portal bestaetigt (22.-24.11.2026)
 STATUS_HK1 = {0x08: "Vorhaltezeit", 0x09: "Heizbetrieb", 0x0A: "Komfortbetrieb", 0x0B: "Absenkbetrieb"}
-STATUS_SOLAR = {0x01: "Frostschutz", 0x03: "Einschaltverzögerung", 0x04: "Solaranlage erwärmt Speicher"}
+STATUS_SOLAR = {0x01: "Frostschutz", 0x02: "Anschieben", 0x03: "Einschaltverzögerung", 0x04: "Solaranlage erwärmt Speicher"}
 TOTAL_INCREASING = {"kessel_starts", "kessel_betriebsstunden",
                     "solar_tagesgewinn", "solar_gesamtgewinn",
                     "solar_pumpe_laufzeit", "solar_stagnation"}
