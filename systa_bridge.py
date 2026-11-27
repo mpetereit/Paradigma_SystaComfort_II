@@ -151,6 +151,30 @@ SOLAR_1 = [  # fc 3e 24 01, little endian
 # 1c 24 02 (0,1 kWh); der Tagesgewinn wird als Differenz zum Zaehlerstand bei
 # Tagesbeginn berechnet (persistiert in STATE_FILE).
 STATE_FILE = os.environ.get("STATE_FILE", "/data/state.json")
+# Kessel-Stoercodes (OekoFEN Pellematic = Paradigma Peleo). Kurztexte frei uebersetzt
+# aus der OekoFEN-Betriebsanleitung PE(S)(K)(B) 10-56, Kap. "Stoermeldungen".
+# 5034 am 27.11.2026 live gesehen (Systa + Portal "Stoerung Kessel 5034").
+KESSEL_STOERUNG = {
+    5013: "Unterdruckdose", 5014: "Analogeingang 1", 5015: "Analogeingang 1",
+    5016: "Analogeingang 2", 5017: "Analogeingang 2", 5018: "Motor Turbine",
+    5019: "Zündung", 5020: "Motor Aschebox", 5021: "Vorrat leer",
+    5022: "Magnetventil", 5023: "Motor Reinigung", 5024: "Saugzug",
+    5025: "Umwälzpumpe", 5026: "Austragung 1", 5027: "Austragung 2",
+    5028: "Saugturbine", 5029: "Stokerschnecke", 5030: "Verbrennungsluft",
+    5032: "Not-Aus", 5033: "STB ausgelöst", 5034: "Zündfehler",
+    5036: "Flammüberwachung", 5038: "Rückbrand offen", 5039: "Rückbrand zu",
+    5040: "Rückbrand Endsch.", 5041: "Unterdruck fehlt", 5042: "Unterdruck hoch",
+    5043: "Saugsystem",
+}
+
+
+def stoerung_text(code):
+    if code == 0xFFFF:
+        return "keine"
+    text = KESSEL_STOERUNG.get(code)
+    return f"{code} {text}" if text else f"Code {code}"
+
+
 # Bits (offset, maske, key, name) – per Korrelation mit dem Portal-Scraper
 # bestaetigt (22./23.11.2026, 12 Schaltwechsel).
 COMFORT_1_BITS = [
@@ -358,10 +382,10 @@ def handle(mq, pkt: bytes, rawlog=None):
             mq.pub(key, name, struct.unpack_from(">I", data, off)[0], unit, dclass)
         publish_bits(mq, data, COMFORT_2_BITS)
         if len(data) >= 24:
-            # Byte 22-23: 0xFFFF im gesamten Log (Portal: "Keine Stoerung") -> vermutl.
-            # Stoercode Kessel; andere Werte noch nie gesehen (unbestaetigt)
+            # Byte 22-23: Stoercode Kessel (0xFFFF = keine); bestaetigt 27.11.2026
+            # (0x13AA = 5034, gleichzeitig im Portal "Stoerung Kessel 5034")
             code = struct.unpack_from(">H", data, 22)[0]
-            mq.pub("kessel_stoerung", "Kessel Störung", "keine" if code == 0xFFFF else f"Code {code}")
+            mq.pub("kessel_stoerung", "Kessel Störung", stoerung_text(code))
     elif dev == 0x24 and blk == 0x01:
         publish_fields(mq, data, SOLAR_1, False)
         if len(data) >= 2:
